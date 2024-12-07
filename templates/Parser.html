@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+<form action="{{url_for('soup')}}" method="post">
+    <label for="link">Push to view links</label>
+    <input id="link" type="submit" name="link" value="link_check">
+</form>
+<br>
+<br>
+<table border="1">
+{% for d in link %}
+    <tr>
+        <td>{{ d }}</td>
+    </tr>
+{% endfor %}
+</table>
+
+
+</body>
+</html>
