@@ -1,7 +1,6 @@
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, redirect, url_for
 
-
 app=Flask(__name__)
 html_doc="""
 <html><head><title>The Dormouse's story</title></head>
