@@ -1,5 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
+import csv
 
 page = requests.get("https://www.w3schools.com/python/module_requests.asp")
 
