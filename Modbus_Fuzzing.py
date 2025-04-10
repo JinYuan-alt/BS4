@@ -1,43 +1,63 @@
 from scapy.all import *
 from scapy.layers.inet import IP, TCP
+from scapy.contrib.modbus import *
 import random
-import string
 
 
-def generate_random_payload():
-    base = b"\x00" * random.randint(10, 100)
-    junk = bytes(random.choices(range(0x20, 0x7E), k=random.randint(5, 50)))  # readable junk
-    split = random.randint(0, len(base))
-    return base[:split] + junk + base[split:]
+def generate_malformed_modbus_pdu():
+    # Force invalid function codes, corrupt data, or malformed lengths
+    malformed_type = random.choice([
+        "invalid_func_code",
+        "oversized_pdu",
+        "zero_length",
+        "wrong_endianness",
+        "corrupt_header"
+    ])
+
+    if malformed_type == "invalid_func_code":
+        # Function codes 128-255 are reserved/illegal
+        func_code = random.randint(128, 255)
+        return bytes([func_code]) + bytes([random.randint(0, 255)])  # Add garbage data
+
+    elif malformed_type == "oversized_pdu":
+        # Exceed Modbus max PDU length (253 bytes for TCP)
+        oversized_data = bytes([random.randint(1, 127)]) + os.urandom(300)
+        return oversized_data
+
+    elif malformed_type == "zero_length":
+        # Empty PDU (may break parsers)
+        return b''
+
+    elif malformed_type == "wrong_endianness":
+        # Valid request but with swapped byte order
+        return struct.pack(">H", random.randint(0, 0xFFFF))  # Big-endian in little-endian field
+
+    else:  # "corrupt_header"
+        # Random bytes masquerading as a header
+        return os.urandom(6)  # Typical Modbus header is 6 bytes
 
 
-def polymorphic_packet(target_ip):
-    flags_pool = ["S", "A", "R", "F", "U", "P"]
-    flag_combo = ''.join(random.sample(flags_pool, k=random.randint(1, 3)))  # Mix flags
+def generate_malformed_adu():
+    trans_id = random.randint(0, 0xFFFF)
+    unit_id = random.randint(0, 255)
+    malformed_pdu = generate_malformed_modbus_pdu()
+    return ModbusADURequest(transId=trans_id, unitId=unit_id) / Raw(load=malformed_pdu)
 
-    tcp_opts = [
-        ('MSS', random.randint(0, 1460)),
-        ('WScale', random.randint(0, 14)),
-        ('NOP', None),
-        ('Timestamp', (random.randint(0, 2 ** 32 - 1), 0))
-    ]
-    random.shuffle(tcp_opts)
 
-    pkt = IP(dst=target_ip, ttl=random.randint(1, 255)) / TCP(
-        sport=random.randint(1024, 65535),
-        dport=random.randint(1, 65535),
-        flags=flag_combo,
+def fuzz_modbus_tcp(target_ip):
+    sport = random.randint(1024, 65535)
+    pkt = IP(dst=target_ip) / TCP(
+        sport=sport,
+        dport=502,
+        flags="PA",
         seq=random.randint(0, 2 ** 32 - 1),
         ack=random.randint(0, 2 ** 32 - 1),
-        window=random.randint(0, 65535),
-        urgptr=random.randint(0, 65535),
-        options=tcp_opts[:random.randint(1, len(tcp_opts))]
-    ) / Raw(load=generate_random_payload())
+    ) / generate_malformed_adu()
 
     send(pkt, verbose=0)
-    print(f"Sent polymorphic TCP packet with flags={flag_combo}")
+    print(f"[!] Sent MALFORMED packet to {target_ip}")
 
 
-# Send multiple packets to test
-for _ in range(10):
-    polymorphic_packet("192.168.163.10")  # Replace with your target IP
+# Fuzz aggressively
+for _ in range(100):  # Send 100 malformed packets
+    fuzz_modbus_tcp("192.168.163.10")
